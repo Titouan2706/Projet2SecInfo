@@ -1,7 +1,7 @@
 """
 Prétraitement de CICIDS2017 (version TrafficLabelling) pour la découverte d'actifs.
 
-Entrées  : dossier contenant les 8 CSV (Monday-WorkingHours.pcap_ISCX.csv, ...)
+Entrées  : dossier contenant les 8 CSV ou fichiers Parquet TrafficLabelling
 Sorties  : flows_clean.parquet (ou .csv), hosts.csv (inventaire brut des IP),
            edges.csv (relations IP source -> IP destination : base du graphe de dépendances)
 
@@ -41,9 +41,16 @@ PROTOCOLS = {1: "ICMP", 6: "TCP", 17: "UDP"}
 
 def load_files(folder: str) -> pd.DataFrame:
     frames = []
-    for path in sorted(glob.glob(os.path.join(folder, "*.csv"))):
-        # Les fichiers contiennent des caractères non UTF-8 -> latin-1
-        df = pd.read_csv(path, encoding="latin-1", low_memory=False)
+    csv_paths = sorted(glob.glob(os.path.join(folder, "*.csv")))
+    parquet_paths = sorted(glob.glob(os.path.join(folder, "*.parquet")))
+    if csv_paths and parquet_paths:
+        raise ValueError(f"Le dossier {folder} contient des CSV et des Parquet ; utilisez un seul format.")
+    for path in csv_paths or parquet_paths:
+        if path.endswith(".parquet"):
+            df = pd.read_parquet(path)
+        else:
+            # Les fichiers contiennent des caractères non UTF-8 -> latin-1
+            df = pd.read_csv(path, encoding="latin-1", low_memory=False)
         df.columns = df.columns.str.strip()  # noms de colonnes avec espaces
         missing = [c for c in KEEP if c not in df.columns]
         if missing:
@@ -56,7 +63,7 @@ def load_files(folder: str) -> pd.DataFrame:
         print(f"[load] {os.path.basename(path):55s} {len(df):>9,} lignes")
         frames.append(df)
     if not frames:
-        raise FileNotFoundError(f"Aucun CSV trouvé dans {folder}")
+        raise FileNotFoundError(f"Aucun CSV ou Parquet trouvé dans {folder}")
     return pd.concat(frames, ignore_index=True)
 
 
@@ -94,13 +101,15 @@ def clean(df: pd.DataFrame) -> pd.DataFrame:
     # Doublons
     df.drop_duplicates(inplace=True)
 
-    # Timestamp (format jour/mois/année, sans AM/PM)
-    df["Timestamp"] = pd.to_datetime(df["Timestamp"], format="mixed", dayfirst=True,
-                                     errors="coerce")
+    if df["source_file"].str.endswith(".parquet").all():
+        # Le miroir a déjà normalisé les horodatages en UTC.
+        df["Timestamp"] = pd.to_datetime(df["Timestamp"], utc=True, errors="coerce")
+    else:
+        # Les CSV d'origine utilisent des heures en 12 h sans AM/PM.
+        df["Timestamp"] = pd.to_datetime(df["Timestamp"], format="mixed", dayfirst=True,
+                                         errors="coerce")
+        df.loc[df["Timestamp"].dt.hour < 8, "Timestamp"] += pd.Timedelta(hours=12)
     df.dropna(subset=["Timestamp"], inplace=True)
-    # Les heures sont en 12 h sans AM/PM : la capture va d'environ 8h à 17h,
-    # donc une heure < 8 correspond à l'après-midi.
-    df.loc[df["Timestamp"].dt.hour < 8, "Timestamp"] += pd.Timedelta(hours=12)
 
     print(f"[clean] {n0:,} -> {len(df):,} lignes ({n0 - len(df):,} supprimées)")
     return df.reset_index(drop=True)
