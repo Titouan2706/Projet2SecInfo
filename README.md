@@ -1,5 +1,28 @@
 # Projet2SecInfo
 
+## Run the pipeline
+
+On Windows, install Miniconda with winget if needed, create a local conda
+environment, and install the dependencies:
+
+```powershell
+powershell -ExecutionPolicy Bypass -File scripts\setup.ps1
+```
+
+Then run the downloader, preprocessing, and asset discovery/classification:
+
+```powershell
+powershell -ExecutionPolicy Bypass -File scripts\run.ps1
+```
+
+The pipeline writes intermediate files to `processed\` and asset inventories to
+`outputs\`. Use `powershell -ExecutionPolicy Bypass -File scripts\run.ps1 --skip-download`
+to reuse existing data without accessing the mirror. Run
+`powershell -ExecutionPolicy Bypass -File scripts\run.ps1 --help` for
+input and output options.
+Preprocessing accepts either the mirror's Parquet files or the original
+TrafficLabelling CSV files, but not both in the same directory.
+
 ## CICIDS2017 dataset
 
 Download the labeled network flows and machine-learning features (about 550 MB)
